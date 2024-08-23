@@ -1,0 +1,331 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploying a RDS instance
+
+Parameters:
+  VpcCidrBlock:
+    Type: String
+    Description: The VPC CIDR block to be used for the VPC
+    Default: 10.0.0.0/16
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$ # Basic Pattern Validation
+
+  PublicSubnetCidrA:
+    Type: String
+    Description: The CIDR block for Public Subnet A
+    Default: 10.0.1.0/24
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$ # Basic Pattern Validation
+
+  PublicSubnetCidrB:
+    Type: String
+    Description: The CIDR block for Public Subnet B
+    Default: 10.0.2.0/24
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$ # Basic Pattern Validation
+
+  PublicSubnetCidrC:
+    Type: String
+    Description: The CIDR block for Public Subnet B
+    Default: 10.0.3.0/24
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$ # Basic Pattern Validation
+
+  ZoneA:
+    Type: String
+    Description: The availability Zone One
+    Default: us-east-1a
+
+  ZoneB:
+    Type: String
+    Description: The availability Zone Two
+    Default: us-east-1b
+
+  ZoneC:
+    Type: String
+    Description: The availability Zone Three
+    Default: us-east-1c
+
+  DbInstanceType:
+    Type: String
+    Description: The Type of RDS instance to be used
+    Default: db.t3.micro
+
+  DbName:
+    Type: String
+    Description: RDS DB name
+    Default: wordpressdb
+
+  DbUser:
+    Type: String
+    Description: RDS DB User
+    Default: ecs
+
+  DbPassword:
+    Type: String
+    Description: RDS DB Password
+    Default: Qwerty12345-
+
+  Ec2InstanceType:
+    Type: String
+    Description: EC2 instance Type
+    Default: t2.micro
+
+Resources:
+
+  # Networking Section
+  WpVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidrBlock
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: wp-pvc-cf
+
+  WpPublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WpVPC
+      CidrBlock: !Ref PublicSubnetCidrA
+      AvailabilityZone: !Ref ZoneA
+      Tags:
+        - Key: Name
+          Value: wp-public-a-cf
+
+  WpPublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WpVPC
+      CidrBlock: !Ref PublicSubnetCidrB
+      AvailabilityZone: !Ref ZoneB
+      Tags:
+        - Key: Name
+          Value: wp-public-b-cf
+
+  WpPublicSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WpVPC
+      CidrBlock: !Ref PublicSubnetCidrC
+      AvailabilityZone: !Ref ZoneC
+      Tags:
+        - Key: Name
+          Value: wp-public-c-cf
+
+  WpIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: wp-igw-cf
+
+  WpIGWVPCAttach:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref WpVPC
+      InternetGatewayId: !Ref WpIGW
+
+  WpIGWRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref WpRouteTablePublic
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref WpIGW
+
+  WpRouteTablePublic:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref WpVPC
+      Tags:
+        - Key: Name
+          Value: wp-rt-public-cf
+
+  WpRouteTableSubAssocA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref WpRouteTablePublic
+      SubnetId: !Ref WpPublicSubnetA
+
+  WpRouteTableSubAssocB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref WpRouteTablePublic
+      SubnetId: !Ref WpPublicSubnetB
+
+  WpRouteTableSubAssocC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref WpRouteTablePublic
+      SubnetId: !Ref WpPublicSubnetC
+
+  # Security Groups:
+
+  WpDBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: wp-db-cf
+      GroupDescription: Access to the RDS instances
+      VpcId: !Ref WpVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: wp-db-sg-cf
+
+  WpAlbSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: wp-alb-cf
+      GroupDescription: Access to the hit ALB
+      VpcId: !Ref WpVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: wp-alb-sg-cf
+
+  WpEc2SG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: wp-ec2-cf
+      GroupDescription: Access to the SSH into EC2 Instance
+      VpcId: !Ref WpVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: wp-ec2-sg-cf
+
+  # AWS ELB
+  WpALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: wp-alb-cf
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+      SecurityGroups:
+        - !Ref WpAlbSG
+      Subnets:
+        - !Ref WpPublicSubnetA
+        - !Ref WpPublicSubnetB
+        - !Ref WpPublicSubnetC
+      Tags:
+        - Key: Name
+          Value: wp-alb-cf
+
+  WpTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: wp-alb-tg-cf
+      Protocol: HTTP
+      Port: 80
+      VpcId: !Ref WpVPC
+      TargetType: instance
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 60
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Targets:
+        - Id: !Ref WpEc2Instance
+          Port: 80
+
+  WpElbListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref WpALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WpTargetGroup
+
+  # RDS
+
+  WpRdsSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: wp-db-subnet-cf
+      DBSubnetGroupDescription: VPC Subnets
+      SubnetIds:
+        - !Ref WpPublicSubnetA
+        - !Ref WpPublicSubnetB
+        - !Ref WpPublicSubnetC
+
+  WpRdsInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: !Ref DbName
+      AllocatedStorage: '20'
+      StorageType: gp2
+      Engine: postgres
+      EngineVersion: '16.3'
+      Port: '5432'
+      DBInstanceClass: !Ref DbInstanceType
+      MasterUsername: !Ref DbUser
+      MasterUserPassword: !Ref DbPassword
+      MultiAZ: false
+      VPCSecurityGroups:
+        - !Ref WpDBSG
+      DBSubnetGroupName: !Ref WpRdsSubnetGroup
+      PubliclyAccessible: true
+
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+
+  # EC2
+  WpEc2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-066784287e358dad1
+      InstanceType: !Ref Ec2InstanceType
+      KeyName: vockey
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: "0"
+          SubnetId: !Ref WpPublicSubnetA
+          GroupSet:
+              - !Ref WpEc2SG
+              - !Ref WpAlbSG
+      UserData: !Base64
+        Fn::Sub: |
+          #!/bin/bash
+          yum update -y
+          yum install -y httpd
+          echo "Hello, World!" > /var/www/html/index.html
+          systemctl start httpd
+          systemctl enable httpd
+      Tags:
+        - Key: Name
+          Value: wp-ec2-instance-cf
+
+Outputs:
+  EC2IP:
+    Description: "Public IP address of the EC2 instance"
+    Value: !GetAtt WpEc2Instance.PublicIp
+  RDSHost:
+    Description: "Endpoint of the RDS instance"
+    Value: !GetAtt WpRdsInstance.Endpoint.Address

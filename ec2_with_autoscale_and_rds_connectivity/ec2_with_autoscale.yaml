@@ -1,0 +1,580 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploying a RDS instance
+
+Parameters:
+  VpcCidrBlock:
+    Type: String
+    Description: The VPC CIDR block to be used for the VPC
+    Default: 10.0.0.0/16
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$ # Basic Pattern Validation
+
+  PublicSubnetCidrAppTierA:
+    Type: String
+    Description: The CIDR block for Public Subnet app tier A
+    Default: 10.0.0.0/24
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$ # Basic Pattern Validation
+
+  PublicSubnetCidrAppTierB:
+    Type: String
+    Description: The CIDR block for Public Subnet app tier B
+    Default: 10.0.2.0/24
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$ # Basic Pattern Validation
+
+  PublicSubnetCidrDbTierA:
+    Type: String
+    Description: The CIDR block for Public Subnet DB tier  A
+    Default: 10.0.1.0/24
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$ # Basic Pattern Validation
+
+  PublicSubnetCidrDbTierB:
+    Type: String
+    Description: The CIDR block for Public Subnet DB tier B
+    Default: 10.0.3.0/24
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$ # Basic Pattern Validation
+
+  ZoneA:
+    Type: String
+    Description: The availability Zone One
+    Default: us-east-1a
+
+  ZoneB:
+    Type: String
+    Description: The availability Zone Two
+    Default: us-east-1b
+
+  DbInstanceType:
+    Type: String
+    Description: The Type of RDS instance to be used
+    Default: db.t3.micro
+
+  DbName:
+    Type: String
+    Description: RDS DB name
+    Default: wordpressdb
+
+  DbUser:
+    Type: String
+    Description: RDS DB User
+    Default: ecs
+
+  DbPassword:
+    Type: String
+    Description: RDS DB Password
+    Default: Qwerty12345-
+
+  Ec2InstanceType:
+    Type: String
+    Description: EC2 instance Type
+    Default: t2.micro
+
+  PgsqlTemplateName:
+    Type: String
+    Description: Launch Template Name for postgres asg
+    Default: pgsql-launch-template
+
+  OracleTemplateName:
+    Type: String
+    Description: Launch Template Name for Oracle asg
+    Default: oracle-launch-template
+
+  KeyName:
+    Type: String
+    Description: The SSH key for sshing to EC2 instance
+    Default: vockey
+
+  MaxCapASG:
+    Type: String
+    Description: The max number of instances to be running on ASG
+    Default: '1'
+
+Resources:
+
+  # Networking Section
+  WpVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidrBlock
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: wp-pvc-cf
+
+  WpPublicSubnetAppTierA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WpVPC
+      CidrBlock: !Ref PublicSubnetCidrAppTierA
+      AvailabilityZone: !Ref ZoneA
+      Tags:
+        - Key: Name
+          Value: wp-public-app-a-cf
+
+  WpPublicSubnetAppTierB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WpVPC
+      CidrBlock: !Ref PublicSubnetCidrAppTierB
+      AvailabilityZone: !Ref ZoneB
+      Tags:
+        - Key: Name
+          Value: wp-public-app-b-cf
+
+  WpPublicSubnetDbTierA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WpVPC
+      CidrBlock: !Ref PublicSubnetCidrDbTierA
+      AvailabilityZone: !Ref ZoneA
+      Tags:
+        - Key: Name
+          Value: wp-public-db-a-cf
+
+  WpPublicSubnetDbTierB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WpVPC
+      CidrBlock: !Ref PublicSubnetCidrDbTierB
+      AvailabilityZone: !Ref ZoneB
+      Tags:
+        - Key: Name
+          Value: wp-public-db-b-cf
+
+  WpIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: wp-igw-cf
+
+  WpIGWVPCAttach:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref WpVPC
+      InternetGatewayId: !Ref WpIGW
+
+  WpIGWRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref WpRouteTablePublic
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref WpIGW
+
+  WpRouteTablePublic:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref WpVPC
+      Tags:
+        - Key: Name
+          Value: wp-rt-public-cf
+
+  WpRouteTableSubAssocAppA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref WpRouteTablePublic
+      SubnetId: !Ref WpPublicSubnetAppTierA
+
+  WpRouteTableSubAssocDbA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref WpRouteTablePublic
+      SubnetId: !Ref WpPublicSubnetDbTierA
+
+  WpRouteTableSubAssocAppB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref WpRouteTablePublic
+      SubnetId: !Ref WpPublicSubnetAppTierB
+
+  WpRouteTableSubAssocDbB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref WpRouteTablePublic
+      SubnetId: !Ref WpPublicSubnetDbTierB
+
+  # Security Groups:
+
+  WpDbSgPgsql:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: wp-db-psql-cf
+      GroupDescription: Access to the Postgres RDS instances
+      VpcId: !Ref WpVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: wp-db-sg-cf
+
+  WpDbSgOrc:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: wp-db-oracle-cf
+      GroupDescription: Access to the Oracle RDS instances
+      VpcId: !Ref WpVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 1521
+          ToPort: 1521
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: wp-db-sg-cf
+
+  WpAlbSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: wp-alb-cf
+      GroupDescription: Access to the hit ALB
+      VpcId: !Ref WpVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: wp-alb-sg-cf
+
+  WpEc2SG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: wp-ec2-cf
+      GroupDescription: Access to the SSH into EC2 Instance
+      VpcId: !Ref WpVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: wp-ec2-sg-cf
+
+  # AWS ELB
+  WpALBPgsql:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: wp-alb-pgsql-cf
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+      SecurityGroups:
+        - !Ref WpAlbSG
+      Subnets:
+        - !Ref WpPublicSubnetAppTierA
+        - !Ref WpPublicSubnetAppTierB
+      Tags:
+        - Key: Name
+          Value: wp-alb-cf
+
+  WpALBOracleDb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: wp-alb-oracle-cf
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+      SecurityGroups:
+        - !Ref WpAlbSG
+      Subnets:
+        - !Ref WpPublicSubnetAppTierA
+        - !Ref WpPublicSubnetAppTierB
+      Tags:
+        - Key: Name
+          Value: wp-alb-cf
+
+  WpTargetGroupPgsql:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: wp-alb-pgsql-tg-cf
+      Protocol: HTTP
+      Port: 80
+      VpcId: !Ref WpVPC
+      TargetType: instance
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 60
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+
+  WpTargetGroupOracle:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: wp-alb-oracle-tg-cf
+      Protocol: HTTP
+      Port: 80
+      VpcId: !Ref WpVPC
+      TargetType: instance
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 60
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+
+  WpElbListenerPgsql:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref WpALBPgsql
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WpTargetGroupPgsql
+
+  WpElbListenerOracle:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref WpALBOracleDb
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WpTargetGroupOracle
+
+  WpLaunchTemplatePgsqlInstance:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Ref PgsqlTemplateName
+      LaunchTemplateData:
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: true
+            Groups:
+              - !Ref WpEc2SG
+            DeleteOnTermination: true
+        Placement:
+          Tenancy: default
+        ImageId: ami-066784287e358dad1
+        KeyName: !Ref KeyName
+        InstanceType: t2.micro
+        UserData: !Base64
+          Fn::Sub: |
+            #!/bin/bash
+            yum update -y
+            yum install httpd -y
+            yum install postgresql -y
+            systemctl start httpd
+            systemctl enable httpd
+            echo "Hello World from postgres instance" > /var/www/html/index.html
+
+  WpLaunchTemplateOracleInstance:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Ref OracleTemplateName
+      LaunchTemplateData:
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: true
+            Groups:
+              - !Ref WpEc2SG
+            DeleteOnTermination: true
+        Placement:
+          Tenancy: default
+        ImageId: ami-066784287e358dad1
+        KeyName: !Ref KeyName
+        InstanceType: t2.micro
+        UserData: !Base64
+          Fn::Sub: |
+            #!/bin/bash
+            sudo apt-get update -y
+            sudo apt-get install -y libaio1
+            wget https://download.oracle.com/otn_software/linux/instantclient/instantclient-basic-linux.x64-21.9.0.0.0dbru.zip
+            wget https://download.oracle.com/otn_software/linux/instantclient/instantclient-sqlplus-linux.x64-21.9.0.0.0dbru.zip
+            unzip instantclient-basic-linux.x64-21.9.0.0.0dbru.zip
+            unzip instantclient-sqlplus-linux.x64-21.9.0.0.0dbru.zip
+            sudo mkdir -p /opt/oracle
+            sudo mv instantclient_* /opt/oracle/instantclient
+            echo 'export LD_LIBRARY_PATH=/opt/oracle/instantclient:$LD_LIBRARY_PATH' >> ~/.bashrc
+            echo 'export PATH=/opt/oracle/instantclient:$PATH' >> ~/.bashrc
+            source ~/.bashrc
+            sudo apt-get install python3 -y
+            sudo apt install python3-pip -y
+            pip install django psycopg2
+            sudo apt-get install libpq-dev
+
+  AutoScalingGroupPostgres:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      MinSize: '1'
+      MaxSize: '2'
+      DesiredCapacity: !Ref MaxCapASG
+      TargetGroupARNs:
+        - !Ref WpTargetGroupPgsql
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WpLaunchTemplatePgsqlInstance
+        Version: !GetAtt WpLaunchTemplatePgsqlInstance.LatestVersionNumber
+      VPCZoneIdentifier:
+        - !Ref WpPublicSubnetAppTierA
+        - !Ref WpPublicSubnetAppTierB
+      Tags:
+        - Key: Name
+          PropagateAtLaunch: true
+          Value: Postgres-Autoscaling-Group
+
+  AutoScalingGroupOracle:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      MinSize: '1'
+      MaxSize: '2'
+      DesiredCapacity: !Ref MaxCapASG
+      TargetGroupARNs:
+        - !Ref WpTargetGroupOracle
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WpLaunchTemplateOracleInstance
+        Version: !GetAtt WpLaunchTemplateOracleInstance.LatestVersionNumber
+      VPCZoneIdentifier:
+        - !Ref WpPublicSubnetAppTierA
+        - !Ref WpPublicSubnetAppTierB
+      Tags:
+        - Key: Name
+          PropagateAtLaunch: true
+          Value: Oracle-Autoscaling-Group
+
+  # RDS
+
+# For future USE, We are not doing multiAZ RN
+
+  WpRdsSubnetGroupA:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: wp-db-subnet-a-cf
+      DBSubnetGroupDescription: VPC Subnets for Tier A
+      SubnetIds:
+        - !Ref WpPublicSubnetDbTierA
+        - !Ref WpPublicSubnetDbTierB
+
+  WpRdsSubnetGroupB:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: wp-db-subnet-b-cf
+      DBSubnetGroupDescription: VPC Subnets for Tier B
+      SubnetIds:
+        - !Ref WpPublicSubnetDbTierA
+        - !Ref WpPublicSubnetDbTierB
+
+  WpRdsPgsqlInstanceTier1:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: !Ref DbName
+      AvailabilityZone: !Ref ZoneA
+      AllocatedStorage: '20'
+      StorageType: gp2
+      Engine: postgres
+      EngineVersion: '16.3'
+      Port: '5432'
+      DBInstanceClass: !Ref DbInstanceType
+      MasterUsername: !Ref DbUser
+      MasterUserPassword: !Ref DbPassword
+      MultiAZ: false
+      VPCSecurityGroups:
+        - !Ref WpDbSgPgsql
+      DBSubnetGroupName: !Ref WpRdsSubnetGroupA
+      PubliclyAccessible: true
+
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+
+  WpRdsOracleInstanceTier1:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: !Ref DbName
+      AvailabilityZone: !Ref ZoneA
+      AllocatedStorage: '20'
+      StorageType: gp2
+      Engine: oracle-ee
+      Port: '1521'
+      LicenseModel: bring-your-own-license
+      DBInstanceClass: !Ref DbInstanceType
+      MasterUsername: !Ref DbUser
+      MasterUserPassword: !Ref DbPassword
+      MultiAZ: false
+      VPCSecurityGroups:
+        - !Ref WpDbSgOrc
+      DBSubnetGroupName: !Ref WpRdsSubnetGroupA
+      PubliclyAccessible: true
+
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+
+  WpRdsPgsqlInstanceTier2:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: !Ref DbName
+      AvailabilityZone: !Ref ZoneB
+      AllocatedStorage: '20'
+      StorageType: gp2
+      Engine: postgres
+      EngineVersion: '16.3'
+      Port: '5432'
+      DBInstanceClass: !Ref DbInstanceType
+      MasterUsername: !Ref DbUser
+      MasterUserPassword: !Ref DbPassword
+      MultiAZ: false
+      VPCSecurityGroups:
+        - !Ref WpDbSgPgsql
+      DBSubnetGroupName: !Ref WpRdsSubnetGroupB
+      PubliclyAccessible: true
+
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+
+  WpRdsOracleInstanceTier2:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: !Ref DbName
+      AvailabilityZone: !Ref ZoneB
+      AllocatedStorage: '20'
+      StorageType: gp2
+      Engine: oracle-ee
+      EngineVersion: 19c
+      Port: '1521'
+      LicenseModel: bring-your-own-license
+      DBInstanceClass: !Ref DbInstanceType
+      MasterUsername: !Ref DbUser
+      MasterUserPassword: !Ref DbPassword
+      MultiAZ: false
+      VPCSecurityGroups:
+        - !Ref WpDbSgOrc
+      DBSubnetGroupName: !Ref WpRdsSubnetGroupB
+      PubliclyAccessible: true
+
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+
+#Outputs:
+#  EC2IP:
+#    Description: "Public IP address of the EC2 instance"
+#    Value: !GetAtt WpEc2Instance.PublicIp
+#  RDSHost:
+#    Description: "Endpoint of the RDS instance"
+#    Value: !GetAtt WpRdsInstance.Endpoint.Address

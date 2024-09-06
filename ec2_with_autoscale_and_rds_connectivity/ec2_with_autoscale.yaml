@@ -45,12 +45,17 @@ Parameters:
   DbInstanceType:
     Type: String
     Description: The Type of RDS instance to be used
-    Default: db.t3.micro
+    Default: db.t3.small
 
-  DbName:
+  DbNameOrcl:
     Type: String
     Description: RDS DB name
-    Default: wordpressdb
+    Default: DBORCLE
+
+  DbNamePsql:
+    Type: String
+    Description: RDS DB name
+    Default: DBPSQL
 
   DbUser:
     Type: String
@@ -485,7 +490,7 @@ Resources:
   WpRdsPgsqlInstanceTier1:
     Type: AWS::RDS::DBInstance
     Properties:
-      DBName: !Ref DbName
+      DBName: !Ref DbNamePsql
       AvailabilityZone: !Ref ZoneA
       AllocatedStorage: '20'
       StorageType: gp2
@@ -507,7 +512,7 @@ Resources:
   WpRdsOracleInstanceTier1:
     Type: AWS::RDS::DBInstance
     Properties:
-      DBName: !Ref DbName
+      DBName: !Ref DbNameOrcl
       AvailabilityZone: !Ref ZoneA
       AllocatedStorage: '20'
       StorageType: gp2
@@ -529,7 +534,7 @@ Resources:
   WpRdsPgsqlInstanceTier2:
     Type: AWS::RDS::DBInstance
     Properties:
-      DBName: !Ref DbName
+      DBName: !Ref DbNamePsql
       AvailabilityZone: !Ref ZoneB
       AllocatedStorage: '20'
       StorageType: gp2
@@ -551,12 +556,11 @@ Resources:
   WpRdsOracleInstanceTier2:
     Type: AWS::RDS::DBInstance
     Properties:
-      DBName: !Ref DbName
+      DBName: !Ref DbNameOrcl
       AvailabilityZone: !Ref ZoneB
       AllocatedStorage: '20'
       StorageType: gp2
       Engine: oracle-ee
-      EngineVersion: 19c
       Port: '1521'
       LicenseModel: bring-your-own-license
       DBInstanceClass: !Ref DbInstanceType

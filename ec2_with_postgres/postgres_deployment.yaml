@@ -297,10 +297,31 @@ Resources:
     UpdateReplacePolicy: Delete
 
   # EC2
+
+  Ec2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref Ec2InstanceRole
+
+  Ec2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonRDSFullAccess
+        - arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess
+
   WpEc2Instance:
     Type: AWS::EC2::Instance
     Properties:
-      ImageId: ami-066784287e358dad1
+      ImageId: ami-0e86e20dae9224db8
       InstanceType: !Ref Ec2InstanceType
       KeyName: vockey
       NetworkInterfaces:
@@ -313,14 +334,32 @@ Resources:
       UserData: !Base64
         Fn::Sub: |
           #!/bin/bash
-          yum update -y
-          yum install -y httpd
-          echo "Hello, World!" > /var/www/html/index.html
-          systemctl start httpd
-          systemctl enable httpd
+          sudo apt-get update
+          sudo apt-get install -y git python3 python3-pip python3-venv unzip
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          sudo ./aws/install
+          git clone https://github.com/Srinivas-Ravindranath/Cloudformation_Templates.git
+          cd Cloudformation_Templates/postgres_server
+          sudo python3 -m venv .venv
+          source .venv/bin/activate
+          
+          # Retrieve RDS instance information
+          RDS_INSTANCE_ID=${WpRdsInstance}
+          export rds_host=$(aws rds describe-db-instances \
+          --db-instance-identifier "$RDS_INSTANCE_ID" \
+          --query "DBInstances[0].Endpoint.Address" \
+          --output text)
+          
+          # Install dependencies and run the application
+          pip3 install -r requirements.txt
+          python3 app.py
+
+      IamInstanceProfile: !Ref Ec2InstanceProfile
       Tags:
         - Key: Name
           Value: wp-ec2-instance-cf
+
 
 Outputs:
   EC2IP:

@@ -208,6 +208,10 @@ Resources:
           FromPort: 22
           ToPort: 22
           CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          SourceSecurityGroupId: !Ref WpAlbSG
       SecurityGroupEgress:
         - IpProtocol: '-1'
           FromPort: 0
@@ -240,7 +244,7 @@ Resources:
     Properties:
       Name: wp-alb-tg-cf
       Protocol: HTTP
-      Port: 80
+      Port: 5000
       VpcId: !Ref WpVPC
       TargetType: instance
       HealthCheckProtocol: HTTP
@@ -251,7 +255,7 @@ Resources:
       UnhealthyThresholdCount: 2
       Targets:
         - Id: !Ref WpEc2Instance
-          Port: 80
+          Port: 5000
 
   WpElbListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -339,6 +343,7 @@ Resources:
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
           unzip awscliv2.zip
           sudo ./aws/install
+          cd /home/ubuntu/
           git clone https://github.com/Srinivas-Ravindranath/Cloudformation_Templates.git
           cd Cloudformation_Templates/postgres_server
           sudo python3 -m venv .venv
@@ -346,14 +351,16 @@ Resources:
           
           # Retrieve RDS instance information
           RDS_INSTANCE_ID=${WpRdsInstance}
-          export rds_host=$(aws rds describe-db-instances \
+          export db_host=$(aws rds describe-db-instances \
           --db-instance-identifier "$RDS_INSTANCE_ID" \
           --query "DBInstances[0].Endpoint.Address" \
           --output text)
+          echo "host $db_host"
           
           # Install dependencies and run the application
-          pip3 install -r requirements.txt
-          python3 app.py
+          pip install -r requirements.txt
+          echo $db_host
+          nohup python3 app.py &
 
       IamInstanceProfile: !Ref Ec2InstanceProfile
       Tags:
